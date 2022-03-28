@@ -1,0 +1,23 @@
+- if we need to run a function on a remote computer and wait for the result. This pattern is commonly known as Remote Procedure Call or RPC.
+- RPC
+    * Although RPC is a pretty common pattern in computing, it's often criticised. The problems arise when a programmer is not aware whether a function call is local or if it's a slow RPC.
+    * Confusions like that result in an unpredictable system and adds unnecessary complexity to debugging. Instead of simplifying software, misused RPC can result in unmaintainable spaghetti code.
+    * When in doubt avoid RPC. If you can, you should use an asynchronous pipeline - instead of RPC-like blocking, results are asynchronously pushed to a next computation stage.
+- Callback queue
+    * In general doing RPC over RabbitMQ is easy. A client sends a request message and a server replies with a response message. In order to receive a response we need to send a 'callback' queue address with the request. We can use the default exchange.
+- Message properties
+    The AMQP 0-9-1 protocol predefines a set of 14 properties that go with a message. Most of the properties are rarely used, with the exception of the following:
+    * persistent: Marks a message as persistent (with a value of true) or transient (false).
+    * content_type: Used to describe the mime-type of the encoding. For example for the often used JSON encoding it is a good practice to set this property to: application/json.
+    * reply_to: Commonly used to name a callback queue.
+    * correlation_id: Useful to correlate RPC responses with requests.
+- Correlation Id
+    * having received a response in that queue it's not clear to which request the response belongs. That's when the correlation_id property is used
+    * set it to a unique value for every request. when we receive a message in the callback queue we'll look at this property, and based on that we'll be able to match a response with a request. If we see an unknown correlation_id value, we may safely discard the message - it doesn't belong to our requests.
+    * Although unlikely, it is possible that the RPC server will die just after sending us the answer, but before sending an acknowledgment message for the request. If that happens, the restarted RPC server will process the request again. That's why on the client we must handle the duplicate responses gracefully, and the RPC should ideally be idempotent.
+- RPC will work like this:
+    * When the Client starts up, it creates an anonymous exclusive callback queue.
+    * For an RPC request, the Client sends a message with two properties: reply_to, which is set to the callback queue and correlation_id, which is set to a unique value for every request.
+    * The request is sent to an rpc_queue queue.
+    * The RPC worker (aka: server) is waiting for requests on that queue. When a request appears, it does the job and sends a message with the result back to the Client, using the queue from the reply_to field.
+    * The client waits for data on the callback queue. When a message appears, it checks the correlation_id property. If it matches the value from the request it returns the response to the application.
